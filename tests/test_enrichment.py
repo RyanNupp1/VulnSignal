@@ -138,5 +138,92 @@ class TestEnrichment(unittest.TestCase):
         )
 
 
+
+    @patch("core.enrichment.fetch_cve_details")
+    def test_strategic_selection_prioritizes_recent_ransomware(self, mock_fetch):
+        findings = [
+            {
+                "cve_id": "CVE-2020-0001",
+                "date_added": "2020-01-01",
+                "known_ransomware_use": "Unknown",
+                "triage_score": 5,
+            },
+            {
+                "cve_id": "CVE-2026-0001",
+                "date_added": "2026-10-30",
+                "known_ransomware_use": "Known",
+                "triage_score": 5,
+            },
+        ]
+        mock_fetch.side_effect = [
+            {"cve_id": "CVE-2026-0001", "nvd_found": True}
+        ]
+
+        results = enrich_findings(
+            findings,
+            limit=1,
+            cache_path=self.cache_path,
+        )
+
+        self.assertEqual(
+            results[0]["nvd_enrichment"]["status"],
+            "not_selected",
+        )
+        self.assertEqual(
+            results[1]["nvd_enrichment"]["status"],
+            "retrieved",
+        )
+        mock_fetch.assert_called_once_with(
+            "CVE-2026-0001",
+            session=None,
+        )
+
+    def test_strategic_selection_preserves_original_order(self):
+        findings = [
+            {
+                "cve_id": "CVE-2020-0001",
+                "date_added": "2020-01-01",
+                "known_ransomware_use": "Unknown",
+            },
+            {
+                "cve_id": "CVE-2026-0001",
+                "date_added": "2026-10-30",
+                "known_ransomware_use": "Known",
+            },
+        ]
+
+        results = enrich_findings(
+            findings,
+            limit=0,
+            cache_path=self.cache_path,
+        )
+
+        self.assertEqual(
+            [item["cve_id"] for item in results],
+            ["CVE-2020-0001", "CVE-2026-0001"],
+        )
+
+    def test_selection_metadata_is_attached(self):
+        findings = [
+            {
+                "cve_id": "CVE-2026-0001",
+                "date_added": "2026-10-30",
+                "known_ransomware_use": "Known",
+            }
+        ]
+
+        results = enrich_findings(
+            findings,
+            limit=0,
+            cache_path=self.cache_path,
+        )
+
+        self.assertGreater(results[0]["selection_score"], 0)
+        self.assertIn(
+            "Known ransomware use",
+            results[0]["selection_reasons"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

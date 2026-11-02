@@ -1,10 +1,11 @@
-"""Enrich selected CISA KEV findings with cached NVD details."""
+"""Enrich strategically selected CISA KEV findings with cached NVD details."""
 
 import json
 import time
 from pathlib import Path
 
 from collectors.nvd import fetch_cve_details, NVDCollectorError
+from core.selection import calculate_selection_score
 
 
 DEFAULT_CACHE_PATH = Path("output/nvd_cache.json")
@@ -46,19 +47,48 @@ def enrich_findings(
     session=None,
     sleep_seconds=0,
 ):
-    """Attach NVD details to a limited number of prioritized findings."""
-    cache = load_cache(cache_path)
-    enriched = []
+    """Enrich the highest-selection-score findings while preserving input order."""
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+        raise ValueError("limit must be a non-negative integer")
 
-    selected = findings[:limit]
+    cache = load_cache(cache_path)
+
+    scored_findings = []
+
+    for index, finding in enumerate(findings):
+        selection = calculate_selection_score(finding)
+        scored_findings.append({
+            "index": index,
+            "selection_score": selection["selection_score"],
+            "cve_id": finding.get("cve_id", ""),
+        })
+
+    scored_findings.sort(
+        key=lambda item: (
+            -item["selection_score"],
+            item["cve_id"] if isinstance(item["cve_id"], str) else "",
+        )
+    )
+
+    selected_indices = {
+        item["index"]
+        for item in scored_findings[:limit]
+    }
+
+    enriched = []
+    requests_made = 0
 
     for index, finding in enumerate(findings):
         result = dict(finding)
+        selection = calculate_selection_score(finding)
 
-        if index >= limit:
+        result["selection_score"] = selection["selection_score"]
+        result["selection_reasons"] = selection["selection_reasons"]
+
+        if index not in selected_indices:
             result["nvd_enrichment"] = {
                 "status": "not_selected",
-                "reason": "Outside enrichment limit",
+                "reason": "Lower strategic selection score",
             }
             enriched.append(result)
             continue
@@ -80,6 +110,9 @@ def enrich_findings(
             enriched.append(result)
             continue
 
+        if requests_made > 0 and sleep_seconds > 0:
+            time.sleep(sleep_seconds)
+
         try:
             details = fetch_cve_details(cve_id, session=session)
             cache[cve_id] = details
@@ -93,10 +126,8 @@ def enrich_findings(
                 "error": str(exc),
             }
 
+        requests_made += 1
         enriched.append(result)
-
-        if sleep_seconds > 0 and index < len(selected) - 1:
-            time.sleep(sleep_seconds)
 
     save_cache(cache, cache_path)
     return enriched

@@ -42,12 +42,19 @@ def generate_markdown_report(catalog, analyzed_records):
             f"- CISA remediation due date: {item.get('due_date', 'Not provided')}",
             f"- Known ransomware use: {item.get('known_ransomware_use', 'Unknown')}",
             f"- CISA triage score: {item.get('triage_score', 'Not scored')}",
+            f"- Selection score: {item.get('selection_score', 'Not scored')}",
             "",
             "CISA triage reasons:",
         ])
 
         for reason in item.get("analysis_reasons", []):
             lines.append(f"- {reason}")
+
+        selection_reasons = item.get("selection_reasons", [])
+        if selection_reasons:
+            lines.extend(["", "Strategic enrichment selection reasons:"])
+            for reason in selection_reasons:
+                lines.append(f"- {reason}")
 
         enrichment = item.get("nvd_enrichment", {})
         status = enrichment.get("status", "not_run")
@@ -66,7 +73,6 @@ def generate_markdown_report(catalog, analyzed_records):
             )
 
             cvss = details.get("cvss")
-
             if isinstance(cvss, dict):
                 lines.extend([
                     f"- CVSS version: {cvss.get('version', 'Not provided')}",
@@ -94,12 +100,17 @@ def generate_markdown_report(catalog, analyzed_records):
             lines.append(
                 f"- Lookup error: {enrichment.get('error', 'Unknown error')}"
             )
+
         elif status == "not_selected":
-            lines.append(
-                "- Not queried because the enrichment limit was reached."
+            reason = enrichment.get(
+                "reason",
+                "Lower strategic selection score",
             )
+            lines.append(f"- Not queried: {reason}.")
+
         elif status == "invalid_cve":
             lines.append("- Lookup skipped because the CVE identifier was invalid.")
+
         else:
             lines.append("- NVD enrichment was not performed.")
 
@@ -116,6 +127,8 @@ def generate_markdown_report(catalog, analyzed_records):
         "They are not CVSS scores, confirmed vulnerability assessments, or",
         "organization-specific risk ratings. NVD CVSS scores are reported separately",
         "using the data returned by the National Vulnerability Database.",
+        "Strategic selection scores are a separate internal heuristic used to",
+        "prioritize limited NVD enrichment requests; they are not severity ratings.",
         "CISA KEV inclusion indicates known exploitation, while ransomware-use",
         "status and CISA remediation deadlines provide additional triage context.",
         "CISA remediation deadlines are federal-agency requirements and should not",

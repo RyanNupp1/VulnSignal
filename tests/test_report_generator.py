@@ -99,5 +99,30 @@ class TestReportGenerator(unittest.TestCase):
         self.assertIn("CISA triage score: 7", report)
 
 
+    def test_report_contains_selection_metadata(self):
+        records = [dict(self.records[0])]
+        records[0]["selection_score"] = 145
+        records[0]["selection_reasons"] = [
+            "Known ransomware use",
+            "Added to KEV within 90 days",
+        ]
+
+        report = generate_markdown_report(self.catalog, records)
+
+        self.assertIn("Selection score: 145", report)
+        self.assertIn("Known ransomware use", report)
+        self.assertIn("Added to KEV within 90 days", report)
+
+    def test_report_explains_not_selected_findings(self):
+        records = [dict(self.records[1])]
+        records[0]["nvd_enrichment"] = {
+            "status": "not_selected",
+            "reason": "Lower strategic selection score",
+        }
+
+        report = generate_markdown_report(self.catalog, records)
+
+        self.assertIn("Lower strategic selection score", report)
+
 if __name__ == "__main__":
     unittest.main()
