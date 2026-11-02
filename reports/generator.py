@@ -183,3 +183,134 @@ def generate_markdown_report(catalog, analyzed_records):
     ])
 
     return "\n".join(lines)
+
+
+def generate_customer_brief(catalog, analyzed_records, limit=10):
+    """Generate a concise, customer-facing CISA vulnerability intelligence brief."""
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 0:
+        raise ValueError("limit must be a non-negative integer")
+
+    priorities = Counter(
+        item.get("priority", "UNASSIGNED")
+        for item in analyzed_records
+    )
+
+    known_ransomware = sum(
+        1
+        for item in analyzed_records
+        if str(item.get("known_ransomware_use", "")).strip().lower() == "known"
+    )
+
+    priority_order = {
+        "CRITICAL": 0,
+        "HIGH": 1,
+        "MEDIUM": 2,
+        "LOW": 3,
+        "UNASSIGNED": 4,
+    }
+
+    def ranking_key(item):
+        priority = item.get("priority", "UNASSIGNED")
+        ransomware = (
+            str(item.get("known_ransomware_use", "")).strip().lower()
+            == "known"
+        )
+
+        selection_score = item.get("selection_score", 0)
+        if (
+            isinstance(selection_score, bool)
+            or not isinstance(selection_score, (int, float))
+        ):
+            selection_score = 0
+
+        triage_score = item.get("triage_score", 0)
+        if (
+            isinstance(triage_score, bool)
+            or not isinstance(triage_score, (int, float))
+        ):
+            triage_score = 0
+
+        return (
+            priority_order.get(priority, 4),
+            -int(ransomware),
+            -selection_score,
+            -triage_score,
+            str(item.get("cve_id", "")),
+        )
+    ranked_records = sorted(analyzed_records, key=ranking_key)
+    selected = ranked_records[:limit]
+
+    lines = [
+        "# VulnSignal Customer Intelligence Brief",
+        "",
+        f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+        f"Source: {catalog.get('source', 'Unknown')}",
+        f"Catalog version: {catalog.get('catalog_version', 'Unknown')}",
+        "",
+        "## Executive Overview",
+        "",
+        f"Vulnerabilities analyzed: {len(analyzed_records)}",
+        f"Critical findings: {priorities.get('CRITICAL', 0)}",
+        f"High findings: {priorities.get('HIGH', 0)}",
+        f"Known ransomware-associated findings: {known_ransomware}",
+        "",
+        "## Priority Snapshot",
+        "",
+    ]
+
+    for priority in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "UNASSIGNED"):
+        lines.append(f"- {priority}: {priorities.get(priority, 0)}")
+
+    lines.extend([
+        "",
+        f"## Selected Vulnerabilities (up to {limit})",
+        "",
+    ])
+
+    if not selected:
+        lines.append("No vulnerabilities were available for this brief.")
+    else:
+        for item in selected:
+            lines.extend([
+                f"### {item.get('cve_id', 'Unknown CVE')}",
+                "",
+                f"- Priority: {item.get('priority', 'UNASSIGNED')}",
+                f"- Vendor: {item.get('vendor', 'Not provided')}",
+                f"- Product: {item.get('product', 'Not provided')}",
+                f"- Vulnerability: {item.get('vulnerability_name', 'Not provided')}",
+                f"- Known ransomware use: {item.get('known_ransomware_use', 'Not provided')}",
+                f"- CISA date added: {item.get('date_added', 'Not provided')}",
+                f"- CISA remediation due date: {item.get('due_date', 'Not provided')}",
+            ])
+
+            source_url = item.get("source_url")
+            if source_url:
+                lines.append(f"- CISA source: {source_url}")
+
+            lines.append("")
+
+    lines.extend([
+        "## Recommended Actions",
+        "",
+        "1. Compare affected vendors and products against your asset inventory.",
+        "2. Confirm whether matching systems are exposed or otherwise accessible.",
+        "3. Review vendor advisories and available patches or mitigations.",
+        "4. Prioritize remediation using your organization's risk and exposure context.",
+        "5. Track remediation owners, actions, and outstanding risk.",
+        "",
+        "## Scope and Limitations",
+        "",
+        "This brief summarizes vulnerabilities listed in the CISA Known Exploited",
+        "Vulnerabilities catalog. It does not establish that your organization",
+        "uses affected products or that any of its systems are vulnerable.",
+        "Asset matching, exposure validation, and remediation verification are",
+        "required before making organization-specific decisions.",
+        "",
+        "VulnSignal priority is a preliminary rule-based triage indicator,",
+        "not a CVSS score or an organization-specific risk rating.",
+        "CISA remediation due dates are federal-agency requirements, not",
+        "universal patch deadlines.",
+        "",
+    ])
+
+    return "\n".join(lines)

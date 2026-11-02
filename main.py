@@ -8,7 +8,7 @@ from pathlib import Path
 from collectors.cisa_kev import fetch_kev_catalog
 from core.analyst import analyze_catalog
 from core.enrichment import enrich_findings
-from reports.generator import generate_markdown_report
+from reports.generator import generate_markdown_report, generate_customer_brief
 
 
 def main():
@@ -49,6 +49,16 @@ def main():
     markdown_path = output_dir / f"intel_report_{timestamp}.md"
     markdown_path.write_text(markdown, encoding="utf-8")
 
+    customer_brief = generate_customer_brief(
+        catalog, enriched, limit=10
+    )
+    customer_brief_path = (
+        output_dir / f"customer_brief_{timestamp}.md"
+    )
+    customer_brief_path.write_text(
+        customer_brief, encoding="utf-8"
+    )
+
     json_path = output_dir / f"intel_data_{timestamp}.json"
     json_path.write_text(
         json.dumps(
@@ -67,7 +77,8 @@ def main():
 
     print("\nPipeline completed.")
     print(f"Markdown report: {markdown_path}")
-    print(f"JSON data:      {json_path}")
+    print(f"Customer brief:  {customer_brief_path}")
+    print(f"JSON data:       {json_path}")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 import unittest
 
-from reports.generator import generate_markdown_report
+from reports.generator import generate_markdown_report, generate_customer_brief
 
 
 class TestReportGenerator(unittest.TestCase):
@@ -177,5 +177,83 @@ class TestReportGenerator(unittest.TestCase):
             recommendations_position,
             methodology_position,
         )
+
+
+class TestCustomerBrief(unittest.TestCase):
+    def setUp(self):
+        self.catalog = {
+            "source": "CISA Known Exploited Vulnerabilities",
+            "catalog_version": "2026.10.30",
+        }
+        self.records = [
+            {
+                "cve_id": "CVE-2025-99999",
+                "priority": "LOW",
+                "vendor": "Low Vendor",
+                "product": "Low Product",
+                "triage_score": 2,
+            },
+            {
+                "cve_id": "CVE-2025-12345",
+                "priority": "CRITICAL",
+                "vendor": "Example Vendor",
+                "product": "Example Product",
+                "known_ransomware_use": "Known",
+                "triage_score": 7,
+                "date_added": "2025-01-01",
+                "due_date": "2025-01-10",
+                "source_url": "https://example.com/advisory",
+            },
+        ]
+
+    def test_brief_contains_summary_and_scope_disclaimer(self):
+        brief = generate_customer_brief(self.catalog, self.records)
+        self.assertIn("Vulnerabilities analyzed: 2", brief)
+        self.assertIn("Critical findings: 1", brief)
+        self.assertIn("Known ransomware-associated findings: 1", brief)
+        self.assertIn("Scope and Limitations", brief)
+        self.assertIn("does not establish that your organization", brief)
+
+    def test_critical_finding_ranks_before_low(self):
+        brief = generate_customer_brief(self.catalog, self.records)
+        self.assertLess(
+            brief.index("CVE-2025-12345"),
+            brief.index("CVE-2025-99999"),
+        )
+
+    def test_known_ransomware_breaks_priority_tie(self):
+        records = [
+            {"cve_id": "CVE-2025-11111", "priority": "HIGH"},
+            {
+                "cve_id": "CVE-2025-22222",
+                "priority": "HIGH",
+                "known_ransomware_use": "Known",
+            },
+        ]
+        brief = generate_customer_brief(self.catalog, records)
+        self.assertLess(
+            brief.index("CVE-2025-22222"),
+            brief.index("CVE-2025-11111"),
+        )
+
+    def test_limit_restricts_selected_findings(self):
+        brief = generate_customer_brief(
+            self.catalog, self.records, limit=1
+        )
+        self.assertIn("CVE-2025-12345", brief)
+        self.assertNotIn("CVE-2025-99999", brief)
+
+    def test_empty_records_are_handled(self):
+        brief = generate_customer_brief(self.catalog, [])
+        self.assertIn("Vulnerabilities analyzed: 0", brief)
+        self.assertIn("No vulnerabilities were available", brief)
+
+    def test_invalid_limits_are_rejected(self):
+        for limit in (-1, 1.5, True, "10"):
+            with self.subTest(limit=limit):
+                with self.assertRaises(ValueError):
+                    generate_customer_brief(
+                        self.catalog, self.records, limit=limit
+                    )
 if __name__ == "__main__":
     unittest.main()
