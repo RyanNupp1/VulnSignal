@@ -9,6 +9,14 @@ def generate_markdown_report(catalog, analyzed_records):
         item.get("priority", "UNASSIGNED")
         for item in analyzed_records
     )
+    total_findings = len(analyzed_records)
+
+    known_ransomware = sum(
+        1
+        for item in analyzed_records
+        if str(item.get("known_ransomware_use", "")).strip().lower()
+        == "known"
+    )
 
     lines = [
         "# Cybersecurity Intelligence Report",
@@ -17,6 +25,18 @@ def generate_markdown_report(catalog, analyzed_records):
         f"Source: {catalog.get('source', 'Unknown')}",
         f"Catalog version: {catalog.get('catalog_version', 'Unknown')}",
         f"Records collected: {catalog.get('record_count', len(analyzed_records))}",
+        "",
+        "",
+        "## Executive Summary",
+        "",
+        f"Total vulnerabilities analyzed: {total_findings}",
+        f"Critical findings: {priorities.get('CRITICAL', 0)}",
+        f"High findings: {priorities.get('HIGH', 0)}",
+        f"Findings associated with known ransomware use: {known_ransomware}",
+        "",
+        "These findings come from the CISA Known Exploited Vulnerabilities catalog.",
+        "They are not confirmation that any particular organization's systems",
+        "are affected. Asset inventory and vulnerability matching are required.",
         "",
         "## Priority Summary",
         "",
@@ -121,6 +141,30 @@ def generate_markdown_report(catalog, analyzed_records):
         ])
 
     lines.extend([
+        "## Analyst Recommendations",
+        "",
+        "The following actions are recommended for organizations",
+        "using this intelligence report:",
+        "",
+        "1. **Validate asset inventory:** Identify whether affected",
+        "   vendors and products are present in the environment.",
+        "",
+        "2. **Confirm exposure:** Determine whether affected systems",
+        "   are reachable, externally exposed, or otherwise accessible.",
+        "",
+        "3. **Prioritize remediation:** Review applicable vulnerabilities",
+        "   associated with known exploitation and ransomware activity.",
+        "",
+        "4. **Verify remediation options:** Check vendor advisories,",
+        "   available patches, and applicable mitigation guidance.",
+        "",
+        "5. **Track remediation status:** Document affected assets,",
+        "   assigned owners, remediation actions, and outstanding risk.",
+        "",
+        "These recommendations require organization-specific validation.",
+        "This report does not independently verify asset presence,",
+        "exposure, compromise, or remediation status.",
+        "",
         "## Methodology and Limitations",
         "",
         "CISA priorities are produced by a rule-based preliminary triage heuristic.",

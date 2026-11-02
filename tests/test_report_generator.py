@@ -124,5 +124,58 @@ class TestReportGenerator(unittest.TestCase):
 
         self.assertIn("Lower strategic selection score", report)
 
+    def test_report_contains_executive_summary(self):
+        report = generate_markdown_report(self.catalog, self.records)
+
+        self.assertIn("## Executive Summary", report)
+        self.assertIn("Total vulnerabilities analyzed: 2", report)
+        self.assertIn("Critical findings: 1", report)
+        self.assertIn("High findings: 0", report)
+
+    def test_report_counts_known_ransomware_findings(self):
+        report = generate_markdown_report(self.catalog, self.records)
+
+        self.assertIn("Findings associated with known ransomware use: 1", report)
+
+    def test_unknown_ransomware_status_is_not_counted_as_known(self):
+        records = [dict(self.records[1])]
+        records[0]["known_ransomware_use"] = "Unknown"
+
+        report = generate_markdown_report(self.catalog, records)
+
+        self.assertIn("Findings associated with known ransomware use: 0", report)
+    def test_report_contains_analyst_recommendations(self):
+        report = generate_markdown_report(self.catalog, self.records)
+
+        self.assertIn("## Analyst Recommendations", report)
+        self.assertIn("Validate asset inventory", report)
+        self.assertIn("Confirm exposure", report)
+        self.assertIn("Prioritize remediation", report)
+        self.assertIn("Verify remediation options", report)
+        self.assertIn("Track remediation status", report)
+
+    def test_recommendations_disclose_assessment_limitations(self):
+        report = generate_markdown_report(self.catalog, self.records)
+
+        self.assertIn(
+            "does not independently verify asset presence",
+            report,
+        )
+        self.assertIn("exposure, compromise, or remediation status", report)
+
+    def test_recommendations_precede_methodology(self):
+        report = generate_markdown_report(self.catalog, self.records)
+
+        recommendations_position = report.index(
+            "## Analyst Recommendations"
+        )
+        methodology_position = report.index(
+            "## Methodology and Limitations"
+        )
+
+        self.assertLess(
+            recommendations_position,
+            methodology_position,
+        )
 if __name__ == "__main__":
     unittest.main()
