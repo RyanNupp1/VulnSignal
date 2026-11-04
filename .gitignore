@@ -7,3 +7,9 @@ __pycache__/
 venv/
 output/
 *.log
+
+# Local backups and unrelated experiments
+backups/
+*.bak
+main_lightweight.py
+output_digest.md

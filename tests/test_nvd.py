@@ -6,6 +6,7 @@ import requests
 from collectors.nvd import (
     NVDCollectorError,
     fetch_cve_details,
+    extract_cpe_matches,
 )
 
 
@@ -185,5 +186,105 @@ class TestNVDCollector(unittest.TestCase):
     def test_rejects_malformed_cve_identifier(self):
         with self.assertRaises(ValueError):
             fetch_cve_details("CVE-2025-ABC")
+
+    def test_fetch_cve_details_includes_cpe_matches(self):
+        data = {
+            "vulnerabilities": [{
+                "cve": {
+                    "id": "CVE-2025-12345",
+                    "configurations": [{
+                        "nodes": [{
+                            "operator": "AND",
+                            "negate": True,
+                            "cpeMatch": [{
+                                "criteria": (
+                                    "cpe:2.3:a:example:product:*:*:*:*:*:*:*:*"
+                                ),
+                                "vulnerable": True,
+                                "versionStartIncluding": "2.0",
+                                "versionEndExcluding": "3.0"
+                            }]
+                        }]
+                    }]
+                }
+            }]
+        }
+
+        session = Mock()
+        session.get.return_value = self.make_response(data)
+
+        result = fetch_cve_details(
+            "CVE-2025-12345",
+            session=session
+        )
+
+        self.assertEqual(len(result["cpe_matches"]), 1)
+        self.assertEqual(
+            result["configurations"],
+            data["vulnerabilities"][0]["cve"]["configurations"],
+        )
+        node = result["configurations"][0]["nodes"][0]
+        self.assertEqual(node["operator"], "AND")
+        self.assertTrue(node["negate"])
+        self.assertEqual(
+            result["cpe_matches"][0]["version_start_including"],
+            "2.0"
+        )
+        self.assertEqual(
+            result["cpe_matches"][0]["version_end_excluding"],
+            "3.0"
+        )
+
+    def test_extracts_cpe_match_version_boundaries(self):
+        configurations = [{
+            "nodes": [{
+                "cpeMatch": [{
+                    "criteria": "cpe:2.3:a:example:product:*:*:*:*:*:*:*:*",
+                    "vulnerable": True,
+                    "versionStartIncluding": "2.0",
+                    "versionEndExcluding": "3.0"
+                }]
+            }]
+        }]
+
+        result = extract_cpe_matches(configurations)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["version_start_including"], "2.0")
+        self.assertEqual(result[0]["version_end_excluding"], "3.0")
+        self.assertTrue(result[0]["vulnerable"])
+
+    def test_extracts_nested_cpe_matches(self):
+        configurations = [{
+            "nodes": [{
+                "children": [{
+                    "cpeMatch": [{
+                        "criteria": "cpe:2.3:o:example:system:1.0:*:*:*:*:*:*:*",
+                        "vulnerable": True
+                    }]
+                }]
+            }]
+        }]
+
+        result = extract_cpe_matches(configurations)
+
+        self.assertEqual(len(result), 1)
+        self.assertIn("example:system:1.0", result[0]["criteria"])
+
+    def test_ignores_malformed_cpe_entries(self):
+        configurations = [{
+            "cpeMatch": [
+                None,
+                "invalid",
+                {"criteria": 123},
+                {"criteria": "cpe:2.3:a:example:product:*:*:*:*:*:*:*:*"}
+            ]
+        }]
+
+        result = extract_cpe_matches(configurations)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(len(extract_cpe_matches(None)), 0)
+
 if __name__ == "__main__":
     unittest.main()

@@ -118,15 +118,66 @@ def fetch_cve_details(cve_id, session=None):
         }
         break
 
+    cpe_matches = extract_cpe_matches(cve.get("configurations", []))
+
     return {
         "cve_id": cve.get("id", cve_id),
         "nvd_found": True,
         "description": description,
         "weaknesses": sorted(set(weaknesses)),
         "cvss": cvss,
+        "cpe_matches": cpe_matches,
+        "configurations": cve.get("configurations", []),
         "published": cve.get("published"),
         "last_modified": cve.get("lastModified"),
         "retrieved_at": datetime.now(timezone.utc).isoformat(),
         "source": "NIST National Vulnerability Database",
         "source_url": f"https://nvd.nist.gov/vuln/detail/{cve_id}",
     }
+
+
+def extract_cpe_matches(configurations):
+    """Extract CPE match criteria and version boundaries from NVD data."""
+    matches = []
+
+    def walk(value):
+        if isinstance(value, list):
+            for item in value:
+                walk(item)
+            return
+
+        if not isinstance(value, dict):
+            return
+
+        cpe_matches = value.get("cpeMatch", [])
+        if isinstance(cpe_matches, list):
+            for item in cpe_matches:
+                if not isinstance(item, dict):
+                    continue
+
+                criteria = item.get("criteria")
+                if not isinstance(criteria, str):
+                    continue
+
+                matches.append({
+                    "criteria": criteria,
+                    "vulnerable": item.get("vulnerable"),
+                    "version_start_including": item.get(
+                        "versionStartIncluding"
+                    ),
+                    "version_start_excluding": item.get(
+                        "versionStartExcluding"
+                    ),
+                    "version_end_including": item.get(
+                        "versionEndIncluding"
+                    ),
+                    "version_end_excluding": item.get(
+                        "versionEndExcluding"
+                    ),
+                })
+
+        for key in ("nodes", "children"):
+            walk(value.get(key, []))
+
+    walk(configurations)
+    return matches
