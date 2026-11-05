@@ -1,6 +1,6 @@
 import unittest
 
-from core.asset_matcher import normalize_name, match_assets_to_kev, compare_versions, evaluate_version_range, parse_cpe23, _combine_results, _evaluate_cpe_match, _evaluate_cpe_match_for_host
+from core.asset_matcher import normalize_name, match_assets_to_kev, compare_versions, evaluate_version_range, parse_cpe23, _combine_results, _evaluate_cpe_match, _evaluate_cpe_match_for_host, _evaluate_cpe_node_for_host, _evaluate_cpe_configurations_for_host
 
 
 class TestAssetMatcher(unittest.TestCase):
@@ -513,3 +513,219 @@ class TestHostLevelCPEEvaluation(unittest.TestCase):
             _evaluate_cpe_match_for_host(assets, self.cpe),
             "indeterminate",
         )
+
+
+class TestHostLevelCPEConfiguration(unittest.TestCase):
+    def test_and_matches_vulnerable_application_and_environment(self):
+        assets = [
+            {
+                "part": "a",
+                "vendor": "example",
+                "product": "widget",
+                "version": "2.1",
+            },
+            {
+                "part": "o",
+                "vendor": "example",
+                "product": "linux",
+                "version": "11",
+            },
+        ]
+
+        node = {
+            "operator": "AND",
+            "cpeMatch": [
+                {
+                    "criteria": "cpe:2.3:a:example:widget:2.1:*:*:*:*:*:*:*",
+                    "vulnerable": True,
+                },
+                {
+                    "criteria": "cpe:2.3:o:example:linux:11:*:*:*:*:*:*:*",
+                    "vulnerable": False,
+                },
+            ],
+        }
+
+        result = _evaluate_cpe_node_for_host(assets, node)
+
+        self.assertEqual(result["result"], "match")
+        self.assertTrue(result["vulnerable_match"])
+
+
+class TestHostLevelCPEConfigurationEdgeCases(unittest.TestCase):
+    def test_or_matches_when_one_branch_matches(self):
+        assets = [
+            {
+                "part": "a",
+                "vendor": "example",
+                "product": "widget",
+                "version": "2.1",
+            },
+        ]
+
+        node = {
+            "operator": "OR",
+            "cpeMatch": [
+                {
+                    "criteria": "cpe:2.3:a:example:widget:2.1:*:*:*:*:*:*:*",
+                    "vulnerable": True,
+                },
+                {
+                    "criteria": "cpe:2.3:a:other:product:1.0:*:*:*:*:*:*:*",
+                    "vulnerable": True,
+                },
+            ],
+        }
+
+        result = _evaluate_cpe_node_for_host(assets, node)
+
+        self.assertEqual(result["result"], "match")
+        self.assertTrue(result["vulnerable_match"])
+
+    def test_negated_match_does_not_count_as_vulnerable(self):
+        assets = [
+            {
+                "part": "a",
+                "vendor": "example",
+                "product": "widget",
+                "version": "2.1",
+            },
+        ]
+
+        node = {
+            "operator": "OR",
+            "negate": True,
+            "cpeMatch": [
+                {
+                    "criteria": "cpe:2.3:a:example:widget:2.1:*:*:*:*:*:*:*",
+                    "vulnerable": True,
+                },
+            ],
+        }
+
+        result = _evaluate_cpe_node_for_host(assets, node)
+
+        self.assertEqual(result["result"], "no_match")
+        self.assertFalse(result["vulnerable_match"])
+
+    def test_environmental_only_match_is_not_vulnerability_evidence(self):
+        assets = [
+            {
+                "part": "o",
+                "vendor": "example",
+                "product": "linux",
+                "version": "11",
+            },
+        ]
+
+        node = {
+            "operator": "OR",
+            "cpeMatch": [
+                {
+                    "criteria": "cpe:2.3:o:example:linux:11:*:*:*:*:*:*:*",
+                    "vulnerable": False,
+                },
+            ],
+        }
+
+        result = _evaluate_cpe_node_for_host(assets, node)
+
+        self.assertEqual(result["result"], "match")
+        self.assertFalse(result["vulnerable_match"])
+
+
+class TestHostLevelCPEConfigurations(unittest.TestCase):
+    def setUp(self):
+        self.assets = [{
+            "part": "a",
+            "vendor": "example",
+            "product": "widget",
+            "version": "2.1",
+        }]
+
+    def test_matching_configuration_has_vulnerability_evidence(self):
+        configurations = [{
+            "nodes": [{
+                "operator": "OR",
+                "cpeMatch": [{
+                    "criteria": "cpe:2.3:a:example:widget:2.1:*:*:*:*:*:*:*",
+                    "vulnerable": True,
+                }],
+            }],
+        }]
+
+        result = _evaluate_cpe_configurations_for_host(
+            self.assets, configurations, inventory_complete=True
+        )
+
+        self.assertEqual(result["result"], "match")
+        self.assertTrue(result["vulnerable_match"])
+
+    def test_alternative_configuration_can_match(self):
+        configurations = [
+            {"nodes": [{
+                "operator": "OR",
+                "cpeMatch": [{
+                    "criteria": "cpe:2.3:a:other:product:1.0:*:*:*:*:*:*:*",
+                    "vulnerable": True,
+                }],
+            }]},
+            {"nodes": [{
+                "operator": "OR",
+                "cpeMatch": [{
+                    "criteria": "cpe:2.3:a:example:widget:2.1:*:*:*:*:*:*:*",
+                    "vulnerable": True,
+                }],
+            }]},
+        ]
+
+        result = _evaluate_cpe_configurations_for_host(
+            self.assets, configurations, inventory_complete=True
+        )
+
+        self.assertEqual(result["result"], "match")
+        self.assertTrue(result["vulnerable_match"])
+
+    def test_environmental_only_configuration_is_not_vulnerability(self):
+        configurations = [{
+            "nodes": [{
+                "operator": "OR",
+                "cpeMatch": [{
+                    "criteria": "cpe:2.3:a:example:widget:2.1:*:*:*:*:*:*:*",
+                    "vulnerable": False,
+                }],
+            }],
+        }]
+
+        result = _evaluate_cpe_configurations_for_host(
+            self.assets, configurations, inventory_complete=True
+        )
+
+        self.assertEqual(result["result"], "match")
+        self.assertFalse(result["vulnerable_match"])
+
+    def test_incomplete_inventory_preserves_indeterminate_result(self):
+        configurations = [{
+            "nodes": [{
+                "operator": "OR",
+                "cpeMatch": [{
+                    "criteria": "cpe:2.3:a:other:product:1.0:*:*:*:*:*:*:*",
+                    "vulnerable": True,
+                }],
+            }],
+        }]
+
+        result = _evaluate_cpe_configurations_for_host(
+            self.assets, configurations, inventory_complete=False
+        )
+
+        self.assertEqual(result["result"], "indeterminate")
+        self.assertFalse(result["vulnerable_match"])
+
+    def test_malformed_configuration_is_indeterminate(self):
+        result = _evaluate_cpe_configurations_for_host(
+            self.assets, [None], inventory_complete=True
+        )
+
+        self.assertEqual(result["result"], "indeterminate")
+        self.assertFalse(result["vulnerable_match"])

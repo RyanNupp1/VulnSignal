@@ -513,3 +513,205 @@ def _evaluate_cpe_match_for_host(assets, cpe_match, inventory_complete=False):
         return "indeterminate"
 
     return "no_match"
+
+
+def _evaluate_cpe_node_for_host(assets, node, inventory_complete=False):
+    """Evaluate an NVD configuration node against one host's assets."""
+    if not isinstance(assets, list) or not isinstance(node, dict):
+        return {
+            "result": "indeterminate",
+            "vulnerable_match": False,
+        }
+
+    if not isinstance(inventory_complete, bool):
+        return {
+            "result": "indeterminate",
+            "vulnerable_match": False,
+        }
+
+    if any(not isinstance(asset, dict) for asset in assets):
+        return {
+            "result": "indeterminate",
+            "vulnerable_match": False,
+        }
+
+    operator = node.get("operator")
+    if not isinstance(operator, str):
+        return {
+            "result": "indeterminate",
+            "vulnerable_match": False,
+        }
+
+    operator = operator.upper()
+    if operator not in {"AND", "OR"}:
+        return {
+            "result": "indeterminate",
+            "vulnerable_match": False,
+        }
+
+    negate = node.get("negate", False)
+    if not isinstance(negate, bool):
+        return {
+            "result": "indeterminate",
+            "vulnerable_match": False,
+        }
+
+    operands = []
+    cpe_matches = node.get("cpeMatch", [])
+
+    if not isinstance(cpe_matches, list):
+        return {
+            "result": "indeterminate",
+            "vulnerable_match": False,
+        }
+
+    for cpe_match in cpe_matches:
+        result = _evaluate_cpe_match_for_host(
+            assets,
+            cpe_match,
+            inventory_complete=inventory_complete,
+        )
+
+        vulnerable = (
+            isinstance(cpe_match, dict)
+            and cpe_match.get("vulnerable") is True
+        )
+
+        operands.append({
+            "result": result,
+            "vulnerable_match": result == "match" and vulnerable,
+        })
+
+    children = node.get("children", [])
+
+    if not isinstance(children, list):
+        return {
+            "result": "indeterminate",
+            "vulnerable_match": False,
+        }
+
+    for child in children:
+        operands.append(
+            _evaluate_cpe_node_for_host(
+                assets,
+                child,
+                inventory_complete=inventory_complete,
+            )
+        )
+
+    if not operands:
+        return {
+            "result": "indeterminate",
+            "vulnerable_match": False,
+        }
+
+    combined = _combine_results(
+        operator,
+        [operand["result"] for operand in operands],
+    )
+
+    if negate:
+        if combined == "match":
+            combined = "no_match"
+        elif combined == "no_match":
+            combined = "match"
+
+        return {
+            "result": combined,
+            "vulnerable_match": False,
+        }
+
+    vulnerable_match = (
+        combined == "match"
+        and any(
+            operand["vulnerable_match"]
+            for operand in operands
+            if operand["result"] == "match"
+        )
+    )
+
+    return {
+        "result": combined,
+        "vulnerable_match": vulnerable_match,
+    }
+
+
+def _evaluate_cpe_configurations_for_host(
+    assets,
+    configurations,
+    inventory_complete=False,
+):
+    """Evaluate alternative NVD configurations against one host."""
+    if (
+        not isinstance(assets, list)
+        or not isinstance(configurations, list)
+        or not isinstance(inventory_complete, bool)
+        or not configurations
+        or any(not isinstance(asset, dict) for asset in assets)
+    ):
+        return {
+            "result": "indeterminate",
+            "vulnerable_match": False,
+        }
+
+    configuration_results = []
+
+    for configuration in configurations:
+        if not isinstance(configuration, dict):
+            configuration_results.append({
+                "result": "indeterminate",
+                "vulnerable_match": False,
+            })
+            continue
+
+        nodes = configuration.get("nodes")
+
+        if not isinstance(nodes, list) or not nodes:
+            configuration_results.append({
+                "result": "indeterminate",
+                "vulnerable_match": False,
+            })
+            continue
+
+        node_results = [
+            _evaluate_cpe_node_for_host(
+                assets,
+                node,
+                inventory_complete=inventory_complete,
+            )
+            for node in nodes
+        ]
+
+        configuration_result = _combine_results(
+            "OR",
+            [item["result"] for item in node_results],
+        )
+
+        configuration_results.append({
+            "result": configuration_result,
+            "vulnerable_match": (
+                configuration_result == "match"
+                and any(
+                    item["vulnerable_match"]
+                    for item in node_results
+                    if item["result"] == "match"
+                )
+            ),
+        })
+
+    overall_result = _combine_results(
+        "OR",
+        [item["result"] for item in configuration_results],
+    )
+
+    return {
+        "result": overall_result,
+        "vulnerable_match": (
+            overall_result == "match"
+            and any(
+                item["vulnerable_match"]
+                for item in configuration_results
+                if item["result"] == "match"
+            )
+        ),
+    }
