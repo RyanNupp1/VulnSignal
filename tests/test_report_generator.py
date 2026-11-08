@@ -1,7 +1,10 @@
 import unittest
 
-from reports.generator import generate_markdown_report, generate_customer_brief
-
+from reports.generator import (
+    generate_markdown_report,
+    generate_customer_brief,
+    generate_exposure_report,
+)
 
 class TestReportGenerator(unittest.TestCase):
 
@@ -257,3 +260,156 @@ class TestCustomerBrief(unittest.TestCase):
                     )
 if __name__ == "__main__":
     unittest.main()
+class TestExposureReport(unittest.TestCase):
+
+    def setUp(self):
+        self.assessments = [
+            {
+                "hostname": "server-01",
+                "cve_id": "CVE-2026-12345",
+                "priority": "CRITICAL",
+                "exposure_status": "affected",
+                "assessment_reason": "Vulnerable configuration matched.",
+                "inventory_complete": True,
+                "nvd_status": "retrieved",
+                "source_url": "https://nvd.nist.gov/vuln/detail/CVE-2026-12345",
+            },
+            {
+                "hostname": "server-02",
+                "cve_id": "CVE-2026-12345",
+                "priority": "CRITICAL",
+                "exposure_status": "indeterminate",
+                "assessment_reason": "Insufficient inventory evidence.",
+                "inventory_complete": False,
+                "nvd_status": "retrieved",
+                "source_url": "https://nvd.nist.gov/vuln/detail/CVE-2026-12345",
+            },
+            {
+                "hostname": "server-03",
+                "cve_id": "CVE-2026-99999",
+                "priority": "LOW",
+                "exposure_status": "not_affected",
+                "assessment_reason": "No vulnerable configuration matched.",
+                "inventory_complete": True,
+                "nvd_status": "retrieved",
+                "source_url": "https://nvd.nist.gov/vuln/detail/CVE-2026-99999",
+            },
+        ]
+
+        self.findings = [
+            {
+                "cve_id": "CVE-2026-12345",
+                "vendor": "Example Vendor",
+                "product": "Example Product",
+                "vulnerability_name": "Example vulnerability",
+                "due_date": "2026-12-01",
+                "source_url": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
+                "nvd_enrichment": {
+                    "status": "retrieved",
+                    "data": {
+                        "description": "Example NVD vulnerability description.",
+                        "cvss": {
+                            "base_score": 9.8,
+                            "base_severity": "CRITICAL",
+                        },
+                        "source_url": "https://nvd.nist.gov/vuln/detail/CVE-2026-12345",
+                    },
+                },
+            },
+            {
+                "cve_id": "CVE-2026-99999",
+                "vendor": "Other Vendor",
+                "product": "Other Product",
+                "nvd_enrichment": {
+                    "status": "retrieved",
+                    "data": {},
+                },
+            },
+        ]
+
+    def test_report_contains_executive_summary_counts(self):
+        report = generate_exposure_report(
+            self.assessments,
+            self.findings,
+            customer_name="Example MSP",
+        )
+
+        self.assertIn("Example MSP", report)
+        self.assertIn("Hosts assessed: 3", report)
+        self.assertIn("Host/CVE assessments: 3", report)
+        self.assertIn("Affected assessments: 1", report)
+        self.assertIn("Indeterminate assessments: 1", report)
+        self.assertIn("Not affected assessments: 1", report)
+
+    def test_report_contains_host_exposure_overview(self):
+        report = generate_exposure_report(
+            self.assessments, self.findings
+        )
+
+        self.assertIn("server-01", report)
+        self.assertIn("server-02", report)
+        self.assertIn("server-03", report)
+        self.assertIn("CVE-2026-12345", report)
+        self.assertIn("affected", report)
+
+    def test_affected_finding_contains_vulnerability_details(self):
+        report = generate_exposure_report(
+            self.assessments, self.findings
+        )
+
+        self.assertIn("Example Vendor", report)
+        self.assertIn("Example Product", report)
+        self.assertIn("Example vulnerability", report)
+        self.assertIn("CVSS base score: 9.8", report)
+        self.assertIn("CVSS severity: CRITICAL", report)
+        self.assertIn("Example NVD vulnerability description.", report)
+        self.assertIn("2026-12-01", report)
+
+    def test_indeterminate_findings_are_separated(self):
+        report = generate_exposure_report(
+            self.assessments, self.findings
+        )
+
+        self.assertIn("## Indeterminate Findings", report)
+        self.assertIn("Insufficient inventory evidence.", report)
+        self.assertIn("must not be treated as safe", report)
+
+    def test_not_affected_findings_are_separated(self):
+        report = generate_exposure_report(
+            self.assessments, self.findings
+        )
+
+        self.assertIn("## Not Affected Findings", report)
+        self.assertIn("server-03", report)
+        self.assertIn("No vulnerable configuration matched.", report)
+
+    def test_report_contains_source_references(self):
+        report = generate_exposure_report(
+            self.assessments, self.findings
+        )
+
+        self.assertIn(
+            "https://nvd.nist.gov/vuln/detail/CVE-2026-12345",
+            report,
+        )
+        self.assertIn(
+            "https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
+            report,
+        )
+
+    def test_empty_assessments_are_handled(self):
+        report = generate_exposure_report([], [])
+
+        self.assertIn("Hosts assessed: 0", report)
+        self.assertIn("Host/CVE assessments: 0", report)
+        self.assertIn("No findings in this category.", report)
+
+    def test_invalid_inputs_are_rejected(self):
+        with self.assertRaises(ValueError):
+            generate_exposure_report({}, [])
+
+        with self.assertRaises(ValueError):
+            generate_exposure_report([], {})
+
+        with self.assertRaises(ValueError):
+            generate_exposure_report([], [], customer_name="")

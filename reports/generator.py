@@ -314,3 +314,170 @@ def generate_customer_brief(catalog, analyzed_records, limit=10):
     ])
 
     return "\n".join(lines)
+def generate_exposure_report(
+    assessments,
+    findings,
+    customer_name="Customer",
+):
+    """Generate a customer-facing host-level vulnerability exposure report."""
+    if not isinstance(assessments, list):
+        raise ValueError("assessments must be supplied as a list.")
+
+    if not isinstance(findings, list):
+        raise ValueError("findings must be supplied as a list.")
+
+    if not isinstance(customer_name, str) or not customer_name.strip():
+        raise ValueError("customer_name must be a non-empty string.")
+
+    if any(not isinstance(item, dict) for item in assessments):
+        raise ValueError("Each assessment must be a dictionary.")
+
+    if any(not isinstance(item, dict) for item in findings):
+        raise ValueError("Each finding must be a dictionary.")
+
+    finding_lookup = {
+        item.get("cve_id"): item
+        for item in findings
+        if item.get("cve_id")
+    }
+
+    counts = Counter(
+        item.get("exposure_status", "indeterminate")
+        for item in assessments
+    )
+
+    total = len(assessments)
+    affected = counts.get("affected", 0)
+    indeterminate = counts.get("indeterminate", 0)
+    not_affected = counts.get("not_affected", 0)
+
+    hosts = sorted({
+        item.get("hostname", "Unknown")
+        for item in assessments
+    })
+
+    lines = [
+        f"# Vulnerability Exposure Assessment: {customer_name.strip()}",
+        "",
+        (
+            f"Generated: "
+            f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
+        ),
+        "",
+        "## Executive Summary",
+        "",
+        f"- Hosts assessed: {len(hosts)}",
+        f"- Host/CVE assessments: {total}",
+        f"- Affected assessments: {affected}",
+        f"- Indeterminate assessments: {indeterminate}",
+        f"- Not affected assessments: {not_affected}",
+        "",
+        "## Host Exposure Overview",
+        "",
+        "| Host | CVE | Priority | Exposure Status |",
+        "|---|---|---|---|",
+    ]
+
+    for item in assessments:
+        hostname = item.get("hostname") or "Unknown"
+        cve_id = item.get("cve_id") or "Unknown"
+        priority = item.get("priority") or "UNASSIGNED"
+        status = item.get("exposure_status") or "indeterminate"
+
+        lines.append(
+            f"| {hostname} | {cve_id} | {priority} | {status} |"
+        )
+
+    for status, heading in (
+        ("affected", "Affected Findings"),
+        ("indeterminate", "Indeterminate Findings"),
+        ("not_affected", "Not Affected Findings"),
+    ):
+        matching = [
+            item for item in assessments
+            if item.get("exposure_status", "indeterminate") == status
+        ]
+
+        lines.extend(["", f"## {heading}", ""])
+
+        if not matching:
+            lines.append("No findings in this category.")
+            continue
+
+        for item in matching:
+            cve_id = item.get("cve_id") or "Unknown"
+            finding = finding_lookup.get(cve_id, {})
+            enrichment = finding.get("nvd_enrichment")
+            enrichment = enrichment if isinstance(enrichment, dict) else {}
+            details = enrichment.get("data")
+            details = details if isinstance(details, dict) else {}
+
+            lines.extend([
+                f"### {cve_id} — {item.get('hostname', 'Unknown')}",
+                "",
+                f"- Exposure status: **{status.upper()}**",
+                f"- Priority: {item.get('priority') or 'UNASSIGNED'}",
+                f"- Assessment reason: {item.get('assessment_reason') or 'Not provided'}",
+                f"- Vendor: {finding.get('vendor', 'Not provided')}",
+                f"- Product: {finding.get('product', 'Not provided')}",
+                f"- Vulnerability: {finding.get('vulnerability_name', 'Not provided')}",
+                f"- NVD status: {item.get('nvd_status', 'missing')}",
+                f"- Inventory declared complete: {item.get('inventory_complete', False)}",
+            ])
+
+            description = details.get("description")
+            if description:
+                lines.extend(["", f"**Description:** {description}"])
+
+            cvss = details.get("cvss")
+            if isinstance(cvss, dict):
+                score = cvss.get("base_score")
+                severity = cvss.get("base_severity")
+                if score is not None:
+                    lines.append(f"- CVSS base score: {score}")
+                if severity:
+                    lines.append(f"- CVSS severity: {severity}")
+
+            due_date = finding.get("due_date")
+            if due_date:
+                lines.append(f"- CISA remediation due date: {due_date}")
+
+            source_url = item.get("source_url") or details.get("source_url")
+            if source_url:
+                lines.append(f"- NVD/source reference: {source_url}")
+
+            cisa_url = finding.get("source_url")
+            if cisa_url:
+                lines.append(f"- CISA reference: {cisa_url}")
+
+            lines.append("")
+
+    lines.extend([
+        "## Recommended Actions",
+        "",
+        "1. Investigate all affected host/CVE combinations and verify installed versions.",
+        "2. Review vendor advisories and available patches or mitigations.",
+        "3. Investigate indeterminate findings before treating systems as unaffected.",
+        "4. Document remediation owners, actions, and verification evidence.",
+        "5. Reassess systems after remediation.",
+        "",
+        "## Methodology and Limitations",
+        "",
+        "This assessment correlates the supplied asset inventory with CISA KEV",
+        "findings and available NVD applicability configurations.",
+        "",
+        "An affected result indicates a matching vulnerable NVD configuration.",
+        "An indeterminate result means available evidence was insufficient to",
+        "establish exposure or non-exposure. It must not be treated as safe.",
+        "",
+        "A not affected result requires an explicitly declared complete inventory",
+        "and no applicable vulnerable configuration match.",
+        "",
+        "Results depend on inventory accuracy, product identification, version",
+        "coverage, and the quality and completeness of upstream vulnerability data.",
+        "This assessment is not a penetration test and does not independently",
+        "verify exploitability, compromise, network exposure, or remediation.",
+        "",
+    ])
+
+    return "\n".join(lines)
